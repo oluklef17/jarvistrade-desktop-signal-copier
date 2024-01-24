@@ -28,6 +28,8 @@ channel_list = list()
 
 allowed_chats = list()
 
+MQL4_paths = list()
+
 lastWarning = ""
 
 
@@ -75,7 +77,7 @@ class Ui_MainWindow(object):
             QtCore.Qt.AlignLeading | QtCore.Qt.AlignLeft | QtCore.Qt.AlignTop
         )
         self.signalText.setObjectName("signalText")
-        self.terminalEdit = QtWidgets.QLineEdit(self.centralwidget)
+        self.terminalEdit = QtWidgets.QComboBox(self.centralwidget)
         self.terminalEdit.setGeometry(QtCore.QRect(140, 250, 281, 41))
         self.terminalEdit.setStyleSheet(
             "padding:10px;text-align:center;color:#A85311;background-color:Black"
@@ -137,16 +139,17 @@ class Ui_MainWindow(object):
 
     def updateTerminalList(self):
         global currentList
-        currentTerminal = self.terminalEdit.text()
+        home = os.path.expanduser('~')
+        starting_directory = os.path.join(home, 'AppData','Roaming','MetaQuotes','Terminal')
+        currentTerminal = self.terminalEdit.currentText()
         for i in range(self.terminalList.count()):
             if str(self.terminalList.item(i).text()) not in currentList:
                 currentList.append(str(self.terminalList.item(i).text()))
         if len(currentTerminal) > 0 and currentTerminal not in currentList:
-            currentList.append(currentTerminal)
-        print("Terminal list is ", currentList)
+            currentList.append(os.path.join(starting_directory, currentTerminal))
+        #log("Terminal list is ", currentList)
         self.terminalList.clear()
         self.terminalList.addItems(currentList)
-        self.terminalEdit.setText("")
 
     def updateSourceList(self):
         global allowed_chats
@@ -156,7 +159,7 @@ class Ui_MainWindow(object):
         #         allowed_chats.append(str(self.chatList.item(i).text()))
         if len(currentSource) > 0 and currentSource not in allowed_chats:
             allowed_chats.append(currentSource)
-        print("Chat list is ", allowed_chats)
+        #log("Chat list is ", allowed_chats)
         self.chatList.clear()
         for idx, chat in enumerate(allowed_chats):
             self.chatList.addItem(f'CH{idx + 1}: {chat}')
@@ -189,11 +192,11 @@ def get_env(name, message, cast=str):
         try:
             return cast(value)
         except ValueError as e:
-            print(e, file=sys.stderr)
+            log(e, file=sys.stderr)
             time.sleep(1)
 
 
-session = "user"  # os.environ.get('TG_SESSION', 'printer')
+session = "user"  # os.environ.get('TG_SESSION', 'loger')
 api_id = 19533412
 api_hash = "244adfc8d6a54f85df6958ac3823e203"
 proxy = None  # https://github.com/Anorov/PySocks
@@ -205,9 +208,37 @@ proxy = None  # https://github.com/Anorov/PySocks
 # Use https://regexone.com/ if you want a more interactive way of learning.
 #
 # "(?i)" makes it case-insensitive, and | separates "options".
+def log(*args):
+    arguments = list()
+    
+    for arg in args:
+        arguments.append(str(arg))
+
+    msg = ''.join(arguments)
+
+    print(msg)
+
+    current_time = time.time()
+    log_text = str(datetime.utcfromtimestamp(current_time).strftime('%Y-%m-%d %H:%M:%S')) + ' - ' + msg
+    #ui.logList.addItem(log_text)
+    date = str(datetime.utcfromtimestamp(current_time).strftime('%Y-%m-%d'))
+
+    log_file = os.path.join('logs', f'log_{date}.txt')
+
+    try:
+        if not os.path.exists('logs'):
+            os.makedirs('logs')
+            with open(log_file, 'w') as f:
+                f.write(log_text+'\n')
+        else:
+            with open(log_file, 'a') as f:
+                f.write(log_text+'\n')
+    except Exception as e:
+        log('Could not write log to file: ',e)
+
 def run_bot(queue_in, queue_out):
     if os.path.exists(f"{session}.session") == False:
-        print('Not logged in.')
+        log('Not logged in. Will attempt to launch login terminal.')
         login = None
         path = 'login.exe'
         if os.path.exists(path):
@@ -215,31 +246,24 @@ def run_bot(queue_in, queue_out):
                 login = subprocess.Popen(path)
                 os._exit(0)
             except Exception as e:
-                print('Failed to open login exe. Error = ',e)
+                log('Failed to open login exe. Error = ',e)
             
 
-    # print("run_bot()")
+    # log("run_bot()")
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
-    # print('loop:', loop)
+    # log('loop:', loop)
     
     try:
         client = TelegramClient(session, api_id, api_hash, proxy=proxy)
     except Exception as e:
-        print('Failed to log in to client. Error = ', e)
+        log('Failed to log in to client. Error = ', e)
 
     def sendToMT4(data):
         for i in currentList:
             terminal = os.path.join(i, "MQL4", "Files")
-            terminal2 = os.path.join(i, "MQL5", "Files")
-            if os.path.exists(terminal2) == True:
-                if os.path.exists(os.path.join(terminal2, "lastsignal.txt")) == False:
-                    p = open(os.path.join(terminal2, "lastsignal.txt"), "x")
-                with open(
-                    os.path.join(terminal2, "lastsignal.txt"), "w", encoding="utf-8"
-                ) as f:
-                    f.write(data)
             if os.path.exists(terminal) == True:
+                log(f'Sending {data} to {terminal}')
                 if os.path.exists(os.path.join(terminal, "lastsignal.txt")) == False:
                     p = open(os.path.join(terminal, "lastsignal.txt"), "x")
                 with open(
@@ -250,7 +274,7 @@ def run_bot(queue_in, queue_out):
     @client.on(events.NewMessage())
     async def handler(event):
         try:
-            # print('New message received.')
+            # log('New message received.')
             sender = await event.get_sender()
             name = utils.get_display_name(sender)
             msg = ""
@@ -266,12 +290,12 @@ def run_bot(queue_in, queue_out):
             MSG = msg.upper()
             ui.signalText.setText(msg[: msg.find("{")] + "\n\nFROM: " + name)
         except Exception as e:
-            print("Failed to process last message. Error = ", e)
+            log("Failed to process last message. Error = ", e)
     
     @client.on(events.MessageEdited)
     async def handler(event):
         try:
-            # print('New message received.')
+            # log('New message received.')
             sender = await event.get_sender()
             name = utils.get_display_name(sender)
             msg = ""
@@ -287,23 +311,23 @@ def run_bot(queue_in, queue_out):
             MSG = msg.upper()
             ui.signalText.setText(msg[: msg.find("{")] + "\n\nFROM: " + name)
         except Exception as e:
-            print("Failed to process last message. Error = ", e)
+            log("Failed to process last message. Error = ", e)
 
     async def check_queue():
-        # print('[BOT] check_queue(): start')
+        # log('[BOT] check_queue(): start')
         while True:
             await asyncio.sleep(1)
-            # print('[BOT] check_queue(): check')
+            # log('[BOT] check_queue(): check')
             if not queue_in.empty():
                 cmd = queue_in.get()
-                # print('[BOT] check_queue(): queue_in get:', cmd)
+                # log('[BOT] check_queue(): queue_in get:', cmd)
                 if cmd == "stop":
-                    print("Stopping bot...")
+                    log("Stopping bot...")
                     await client.disconnect()
                     os._exit(0)
                     break
                 if cmd == "logout":
-                    print("Logging out...")
+                    log("Logging out...")
                     await client.log_out()
 
     async def auth_warning():
@@ -317,11 +341,36 @@ def run_bot(queue_in, queue_out):
                 else:
                     ui.authWarning.setText("")
             except Exception as e:
-                print("Failed to warn auth. Error = " + str(e))
+                log("Failed to warn auth. Error = " + str(e))
 
+    async def update_terminals():
+        home = os.path.expanduser('~')
+        starting_directory = os.path.join(home, 'AppData','Roaming','MetaQuotes','Terminal')
+        while len(MQL4_paths) == 0:
+            await asyncio.sleep(1)
+            try:
+                current_directory = os.path.abspath(starting_directory)
+                while current_directory != os.path.dirname(current_directory):
+                    current_directory = os.path.dirname(current_directory)
+                for root, dirs, files in os.walk(starting_directory):
+                    for dir in dirs:
+                        path = os.path.join(root, dir)
+                        #log('Path: ',path)
+                        if path.endswith("MQL4") and 'MQL4' not in root:
+                            path = path.replace('MQL4', '')
+                            path = path.replace(starting_directory, '')
+                            path = path.replace('\\', '')
+                            MQL4_paths.append(path)
+                if len(MQL4_paths) > 0:
+                    ui.terminalEdit.clear()
+                    ui.terminalEdit.addItems(MQL4_paths)
+                    break
+            except Exception as e:
+                log('Failed to get MQL4 paths. Error = ',e)
+        
     async def update_sources():
         global channel_list
-        print("Channels are " + str(channel_list))
+        #log("Channels are " + str(channel_list))
         if len(channel_list) == 0:
             while True:
                 await asyncio.sleep(1)
@@ -330,38 +379,39 @@ def run_bot(queue_in, queue_out):
                     await client.connect()
                     if await client.is_user_authorized():
                         async for dialog in client.iter_dialogs():
-                            # print('Channel is ',dialog.title)
+                            # log('Channel is ',dialog.title)
                             if dialog.is_user == False:
                                 channels.append(dialog.title)
                         channel_list = list(channels)
                         ui.chatSelect.clear()
                         ui.chatSelect.addItems(channel_list)
-                        print('Added ',channel_list)
+                        #log('Added ',channel_list)
                         if ui.chatSelect.count() > 0:
-                            print('Filled chats list.')
+                            log('Filled chats list.')
                             break
                         else:
                             continue
-                # print('Channels are '+str(channel_list))
+                # log('Channels are '+str(channel_list))
                 except Exception as e:
-                    print("Failed to update sources. Error = " + str(e))
+                    log("Failed to update sources. Error = " + str(e))
                     continue
 
     loop.create_task(update_sources())
+    loop.create_task(update_terminals())
     loop.create_task(auth_warning())
     loop.create_task(check_queue())
 
     try:
         with client:
-            # print('[BOT] start')
+            # log('[BOT] start')
             client.run_until_disconnected()
-            print("Client disconnected.")
+            log("Client disconnected.")
     except Exception as e:
         ui.authWarning.setText(
             str(sys.exc_info()[1])
             + ").\n Please check your internet connection\nand restart application."
         )
-        print("Failed to run bot. Error = ", e)
+        log("Failed to run bot. Error = ", e)
 
 
 
@@ -391,23 +441,17 @@ try:
     app.exec_()
     checkState = int(ui.checkBox.checkState())
     if checkState == 0:
-        print("User not logged out")
+        log("User not logged out")
         queue_in.put("stop")
         thread2.join()
         os._exit(0)
     elif checkState == 2:
         queue_in.put("logout")
         thread2.join()
-        print("User logged out")
+        log("User logged out")
         os._exit(0)
 except Exception as e:
-    print("Application error = ", e)
+    log("Application error = ", e)
     ui.authWarning.setText("Application error = ", e)
 
 
-# Note: We used try/finally to show it can be done this way, but using:
-#
-#   with client:
-#       client.run_until_disconnected()
-#
-# is almost always a better idea.
